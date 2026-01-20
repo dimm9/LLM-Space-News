@@ -1,8 +1,6 @@
 # LLM-Space-News
 IBM LLM final project - A Retrieval-Augmented Language Model for Astronomy Knowledge Access
 
-# LLM Tool-Calling API with Mini-RAG and Guardrails
-
 Python · FastAPI · OpenAI / Gemini · Local LLM · FAISS
 
 ## Overview
@@ -65,11 +63,15 @@ evaluate.py    # evaluation and tests
 Create a `.env` file based on `.env.example`:
 
 ```env
-MODEL_MODE=gemini     
-GOOGLE_API_KEY=your_key
-OPENAI_API_KEY=your_key
-GROQ_API_KEY=your_key
-LOCAL_MODEL_NAME=Qwen/Qwen2.5-1.5B-Instruct
+GOOGLE_API_KEY=YOUR_KEY_HERE
+GEMINI_MODEL=GEMINI_MODEL_NAME
+LOCAL_HF_MODEL_NAME=Qwen/Qwen2.5-1.5B-Instruct
+HF_TOKEN=YOUR_TOKEN_HERE
+GROQ_API_KEY=YOUR_KEY_HERE
+GROQ_MODEL_NAME=groq_model_name
+GROQ_BASE_URL=https://api.groq.com/openai/v1
+# 'gemini', 'groq', or 'local'
+MODEL_MODE=gemini
 ```
 
 ---
