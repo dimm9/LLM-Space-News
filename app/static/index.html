@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="pl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Space News AI Agent</title>
+  <style>
+    :root{
+      --bg1:#0b1220;
+      --bg2:#120a2a;
+      --card:rgba(255,255,255,.06);
+      --card2:rgba(255,255,255,.08);
+      --border:rgba(255,255,255,.12);
+      --text:rgba(255,255,255,.92);
+      --muted:rgba(255,255,255,.65);
+      --shadow: 0 10px 30px rgba(0,0,0,.35);
+      --ring: 0 0 0 4px rgba(109,40,217,.25);
+
+      --accentA:#60a5fa;   /* blue */
+      --accentB:#a78bfa;   /* purple */
+
+      --btn:#ef4444;       /* red */
+      --btnHover:#dc2626;
+      --btnText:#ffffff;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(1200px 700px at 20% 10%, rgba(96,165,250,.25), transparent 60%),
+        radial-gradient(900px 600px at 85% 20%, rgba(167,139,250,.22), transparent 55%),
+        radial-gradient(900px 650px at 60% 95%, rgba(239,68,68,.12), transparent 55%),
+        linear-gradient(160deg, var(--bg1), var(--bg2));
+    }
+
+    .wrap{
+      max-width: 980px;
+      margin: 28px auto;
+      padding: 0 14px 28px;
+    }
+
+    .header{
+      display:flex;
+      align-items:flex-end;
+      justify-content:space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+
+    h1{
+      margin: 0;
+      font-size: 26px;
+      letter-spacing: .2px;
+      font-weight: 700;
+      line-height: 1.2;
+      background: linear-gradient(90deg, var(--accentA), var(--accentB));
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+    }
+
+    .sub{
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .pill{
+      display:inline-flex;
+      align-items:center;
+      gap: 8px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.04);
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .pill code{
+      color: rgba(255,255,255,.80);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+    }
+
+    .card{
+      background: linear-gradient(180deg, var(--card), rgba(255,255,255,.04));
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 14px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .label{
+      font-size: 13px;
+      color: var(--muted);
+      margin-bottom: 8px;
+      display:block;
+    }
+
+    textarea{
+      width: 100%;
+      min-height: 125px;
+      resize: vertical;
+      padding: 12px 12px;
+      border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,.25);
+      color: var(--text);
+      outline: none;
+      line-height: 1.45;
+    }
+
+    textarea::placeholder{ color: rgba(255,255,255,.45); }
+    textarea:focus{ box-shadow: var(--ring); border-color: rgba(167,139,250,.55); }
+
+    .row{
+      display:flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      align-items: center;
+      margin-top: 12px;
+    }
+
+    .field{
+      display:flex;
+      align-items:center;
+      gap: 8px;
+      padding: 9px 10px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: rgba(255,255,255,.04);
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .field strong{ color: rgba(255,255,255,.80); font-weight: 600; }
+
+    input[type="number"], select{
+      background: rgba(0,0,0,.25);
+      color: var(--text);
+      border: 1px solid rgba(255,255,255,.14);
+      border-radius: 10px;
+      padding: 7px 8px;
+      outline: none;
+    }
+    input[type="number"]:focus, select:focus{ box-shadow: var(--ring); border-color: rgba(96,165,250,.55); }
+
+    input[type="checkbox"]{ accent-color: #7c3aed; transform: translateY(1px); }
+
+    button{
+      border: none;
+      border-radius: 12px;
+      padding: 10px 14px;
+      cursor: pointer;
+      color: var(--btnText);
+      background: linear-gradient(180deg, var(--btn), var(--btnHover));
+      box-shadow: 0 12px 24px rgba(239,68,68,.18);
+      font-weight: 650;
+      letter-spacing: .2px;
+    }
+    button:hover{ filter: brightness(1.03); }
+    button:active{ transform: translateY(1px); }
+    button:disabled{
+      opacity: .6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .status{
+      color: var(--muted);
+      font-size: 13px;
+      margin-left: 4px;
+    }
+
+    .out{
+      margin-top: 14px;
+      display:none;
+    }
+
+    .outHead{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .meta{
+      color: var(--muted);
+      font-size: 12px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.04);
+      white-space: nowrap;
+    }
+
+    pre{
+      margin: 0;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      background: rgba(0,0,0,.25);
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 14px;
+      padding: 12px;
+      line-height: 1.5;
+      color: rgba(255,255,255,.90);
+    }
+
+    .error{
+      margin-top: 10px;
+      color: #fecaca;
+      background: rgba(239,68,68,.10);
+      border: 1px solid rgba(239,68,68,.25);
+      padding: 10px 12px;
+      border-radius: 14px;
+      display:none;
+    }
+
+    .hint{
+      margin-top: 10px;
+      font-size: 12px;
+      color: rgba(255,255,255,.55);
+    }
+    .hint kbd{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 11px;
+      padding: 2px 6px;
+      border: 1px solid rgba(255,255,255,.18);
+      border-bottom-width: 2px;
+      border-radius: 8px;
+      background: rgba(255,255,255,.06);
+      color: rgba(255,255,255,.8);
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div>
+        <h1>Space News AI Agent</h1>
+      </div>
+      <div class="pill">
+        UI → REST API: <code>POST /ask</code>
+      </div>
+    </div>
+
+    <div class="card">
+      <label for="q" class="label"><strong>Question</strong></label>
+      <textarea id="q" placeholder="e.g. Explain satellites, JWST instruments, or AI for onboard autonomy..."></textarea>
+
+      <div class="row">
+        <label class="field">
+          <strong>k</strong>
+          <input id="k" type="number" min="1" max="10" value="3" />
+        </label>
+
+        <label class="field">
+          <strong>mode</strong>
+          <select id="mode">
+            <option value="standard" selected>standard</option>
+            <option value="concise">concise</option>
+            <option value="detailed">detailed</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <strong>model</strong>
+          <select id="model_mode">
+            <option value="gemini" selected>gemini</option>
+            <option value="groq">groq</option>
+            <option value="local">local</option>
+          </select>
+        </label>
+
+        <button id="send">Send</button>
+        <span id="status" class="status"></span>
+      </div>
+
+      <div class="hint">Tip: press <kbd>Ctrl</kbd> + <kbd>Enter</kbd> to send.</div>
+    </div>
+
+    <div id="out" class="card out">
+      <div class="outHead">
+        <div><strong>Answer</strong></div>
+        <div class="meta" id="meta">status=? | tool=-</div>
+      </div>
+      <pre id="answer"></pre>
+      <div id="err" class="error"></div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function setSending(isSending) {
+      $("send").disabled = isSending;
+      $("status").textContent = isSending ? "Sending…" : "Ready.";
+    }
+
+    async function ask() {
+      const q = $("q").value.trim();
+      if (!q) {
+        $("out").style.display = "block";
+        $("answer").textContent = "";
+        $("meta").textContent = "status=validation | tool=-";
+        $("err").style.display = "block";
+        $("err").textContent = "Please enter a question.";
+        return;
+      }
+
+      setSending(true);
+      $("err").style.display = "none";
+      $("err").textContent = "";
+      $("out").style.display = "none";
+
+      const payload = {
+        query: q,
+        use_functions: $("use_functions").checked,
+        k: parseInt($("k").value || "3", 10),
+        mode: $("mode").value,
+        model_mode: $("model_mode").value
+      };
+
+      try {
+        const res = await fetch("/ask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        const txt = await res.text();
+        let data;
+        try { data = JSON.parse(txt); } catch { data = { answer: txt, status: "unknown" }; }
+
+        $("out").style.display = "block";
+        $("answer").textContent = data.answer ?? "";
+        $("meta").textContent = `status=${data.status ?? "?"} | tool=${data.tool_used ?? "-"}`;
+
+        if (!res.ok) {
+          $("err").style.display = "block";
+          $("err").textContent = data.detail ? String(data.detail) : `HTTP ${res.status}`;
+        }
+
+      } catch (e) {
+        $("out").style.display = "block";
+        $("answer").textContent = "";
+        $("meta").textContent = "status=network_error | tool=-";
+        $("err").style.display = "block";
+        $("err").textContent = String(e);
+      } finally {
+        setSending(false);
+      }
+    }
+
+    $("send").addEventListener("click", ask);
+
+    $("q").addEventListener("keydown", (ev) => {
+      if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") {
+        ev.preventDefault();
+        ask();
+      }
+    });
+  </script>
+</body>
+</html>
