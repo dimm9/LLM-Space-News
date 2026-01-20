@@ -87,7 +87,9 @@ pip install -r requirements.txt
 Start the API server:
 
 ```bash
-uvicorn main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload 
+
 ```
 
 ---
@@ -149,6 +151,4 @@ pytest
 * All tool executions are validated, allowlisted, and sandboxed.
 
 ---
-
-Developed for **IBM SkillsBuild – UMCS: Large Language Models**.
 
