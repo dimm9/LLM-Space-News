@@ -9,7 +9,6 @@ from openai import OpenAI
 load_dotenv()
 
 MODEL_MODE = os.getenv("MODEL_MODE", 'gemini')
-
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", None)
 
@@ -19,24 +18,43 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", None)
 
 LOCAL_MODEL_NAME = os.getenv("LOCAL_MODEL_NAME", "Qwen/Qwen2.5-1.5B-Instruct")
 
+_local_tokenizer = None
+_local_model = None
+_device = None
 
-tokenizer = AutoTokenizer.from_pretrained(LOCAL_MODEL_NAME, trust_remote_code=True)
-model = AutoModelForCausalLM.from_pretrained(
-    LOCAL_MODEL_NAME,
-    dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
-    device_map="auto" if torch.cuda.is_available() else None,
-)
-device = "cuda" if torch.cuda.is_available() else "cpu"
-model = model.to(device)
 
-def build_prompt(system: str, user: str) -> str:
+def get_local_resources():
+    global _local_tokenizer, _local_model, _device
+    if _local_model is not None:
+        return _local_tokenizer, _local_model, _device
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(LOCAL_MODEL_NAME, trust_remote_code=True)
+        model = AutoModelForCausalLM.from_pretrained(
+            LOCAL_MODEL_NAME,
+            dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+            device_map="auto" if torch.cuda.is_available() else None,
+        )
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        model = model.to(device)
+        _local_tokenizer = tokenizer
+        _local_model = model
+        _device = device
+        return tokenizer, model, device
+    except Exception as e:
+        print(f"Error loading local model: {e}")
+        raise e
+
+
+def build_prompt(tokenizer, system: str, user: str) -> str:
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     if hasattr(tokenizer, "apply_chat_template"):
         return tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
     return f"[SYSTEM]\n{system}\n[USER]\n{user}\n[ASSISTANT]\n"
 
-def count_tokens_local(text: str) -> int:
+
+def count_tokens_local(tokenizer, text: str) -> int:
     return len(tokenizer.encode(text))
+
 
 gclient = None
 if GOOGLE_API_KEY and genai:
@@ -46,27 +64,29 @@ client = None
 if GROQ_API_KEY:
     client = OpenAI(api_key=GROQ_API_KEY, base_url="https://api.groq.com/openai/v1")
 
+
 def _is_rate_limited(err: Exception) -> bool:
     msg = str(err).lower()
     return (
-        "resource_exhausted" in msg
-        or "quota" in msg
-        or "429" in msg
-        or "rate limit" in msg
-        or "too many requests" in msg
+            "resource_exhausted" in msg
+            or "quota" in msg
+            or "429" in msg
+            or "rate limit" in msg
+            or "too many requests" in msg
     )
+
 
 def _looks_like_gemini_rate_limit(out: dict) -> bool:
     txt = (out or {}).get("text", "")
     low = txt.lower()
     return (
-        "error gemini" in low
-        and (
-            "resource_exhausted" in low
-            or "quota" in low
-            or "429" in low
-            or "overloaded" in low
-        )
+            "error gemini" in low
+            and (
+                    "resource_exhausted" in low
+                    or "quota" in low
+                    or "429" in low
+                    or "overloaded" in low
+            )
     )
 
 
@@ -79,9 +99,12 @@ def local_generate(
         top_p: float = 0.9,
         top_k: Optional[int] = None,
 ) -> Dict[str, Any]:
+    tokenizer, model, device = get_local_resources()
+
     t0 = time.perf_counter()
-    text = build_prompt(system, prompt)
+    text = build_prompt(tokenizer, system, prompt)
     inputs = tokenizer(text, return_tensors="pt").to(device)
+
     do_sample = temperature > 0.0
     gen_kwargs: Dict[str, Any] = dict(
         max_new_tokens=max_output_tokens,
@@ -92,12 +115,15 @@ def local_generate(
         gen_kwargs.update(dict(temperature=temperature, top_p=top_p))
         if top_k is not None:
             gen_kwargs["top_k"] = int(top_k)
+
     output_ids = model.generate(**inputs, **gen_kwargs)
     gen_only = output_ids[0, inputs["input_ids"].shape[-1]:]
     output_txt = tokenizer.decode(gen_only, skip_special_tokens=True)
     dt = time.perf_counter() - t0
-    ptoks = count_tokens_local(prompt) + count_tokens_local(system)
-    ctoks = count_tokens_local(output_txt)
+
+    ptoks = count_tokens_local(tokenizer, prompt) + count_tokens_local(tokenizer, system)
+    ctoks = count_tokens_local(tokenizer, output_txt)
+
     return {
         "text": output_txt,
         "latency_s": round(dt, 3),
@@ -153,7 +179,9 @@ def gemini_generate(prompt: str, system: str = "You are a helpful assistant", te
                 return {"text": f"Error Gemini: {e}", "usage": {}}
     return {"text": f"Error Gemini (Max Retries Exceeded): {last_error}", "usage": {}}
 
-def groq_generate(prompt : str, system : str = "You are a helpful assistant", temperature : float = 0.0, top_p : float = 1.0, max_output_tokens : int = 256) -> dict:
+
+def groq_generate(prompt: str, system: str = "You are a helpful assistant", temperature: float = 0.0,
+                  top_p: float = 1.0, max_output_tokens: int = 256) -> dict:
     if client is None:
         raise RuntimeError("Groq client not configured (missing GROQ_API_KEY).")
     t0 = time.perf_counter()
@@ -174,85 +202,35 @@ def groq_generate(prompt : str, system : str = "You are a helpful assistant", te
         "usage": usage_dict,
     }
 
+
 def chat_once(
-    prompt: str,
-    system: str = "You are a helpful assistant.",
-    temperature: float = 0.0,
-    top_p: float = 1.0,
-    top_k: int | None = None,
-    max_output_tokens: int = 256,
-    model_mode: str | None = None,
+        prompt: str,
+        system: str = "You are a helpful assistant.",
+        temperature: float = 0.0,
+        top_p: float = 1.0,
+        top_k: int | None = None,
+        max_output_tokens: int = 256,
+        model_mode: str | None = None,
 ) -> dict:
-    """
-    Fallback:
-      gemini -> groq -> local
-      groq   -> local
-      local  -> local
-    """
     mode = (model_mode or os.getenv("MODEL_MODE", "gemini") or "local").lower()
+
     if mode == "gemini":
-        out = gemini_generate(
-            prompt=prompt,
-            system=system,
-            temperature=temperature,
-            top_p=top_p,
-            top_k=top_k if top_k is not None else 40,
-            max_output_tokens=max_output_tokens,
-        )
+        out = gemini_generate(prompt, system, temperature, top_p, top_k or 40, max_output_tokens)
         if _looks_like_gemini_rate_limit(out):
             try:
-                out2 = groq_generate(
-                    prompt=prompt,
-                    system=system,
-                    temperature=temperature,
-                    top_p=top_p,
-                    max_output_tokens=max_output_tokens,
-                )
+                out2 = groq_generate(prompt, system, temperature, top_p, max_output_tokens)
                 out2["fallback_used"] = "groq"
-                out2["fallback_reason"] = "rate_limited_gemini"
                 return out2
             except Exception:
-                out3 = local_generate(
-                    prompt=prompt,
-                    system=system,
-                    temperature=temperature,
-                    top_p=top_p,
-                    top_k=top_k,
-                    max_output_tokens=max_output_tokens,
-                )
+                out3 = local_generate(prompt, system, max_output_tokens, temperature, top_p, top_k)
                 out3["fallback_used"] = "local"
-                out3["fallback_reason"] = "rate_limited_gemini_and_groq_failed"
                 return out3
-
         return out
 
     if mode == "groq":
         try:
-            return groq_generate(
-                prompt=prompt,
-                system=system,
-                temperature=temperature,
-                top_p=top_p,
-                max_output_tokens=max_output_tokens,
-            )
+            return groq_generate(prompt, system, temperature, top_p, max_output_tokens)
         except Exception:
-            out = local_generate(
-                prompt=prompt,
-                system=system,
-                temperature=temperature,
-                top_p=top_p,
-                top_k=top_k,
-                max_output_tokens=max_output_tokens,
-            )
-            out["fallback_used"] = "local"
-            out["fallback_reason"] = "rate_limited_groq"
-            return out
+            return local_generate(prompt, system, max_output_tokens, temperature, top_p, top_k)
 
-    return local_generate(
-        prompt=prompt,
-        system=system,
-        temperature=temperature,
-        top_p=top_p,
-        top_k=top_k,
-        max_output_tokens=max_output_tokens,
-    )
+    return local_generate(prompt, system, max_output_tokens, temperature, top_p, top_k)

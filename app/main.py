@@ -39,7 +39,7 @@ def mode_to_style_hint(mode: str) -> str:
 
 
 @app.post("/ask", response_model=AskResponse)
-async def ask_endpoint(req: AskRequest):
+def ask_endpoint(req: AskRequest):
     if not req.use_functions:
         try:
             style = mode_to_style_hint(req.mode)
