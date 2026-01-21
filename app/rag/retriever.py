@@ -15,7 +15,6 @@ MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
 class NasaRetriever:
     def __init__(self):
         self.embedder = SentenceTransformer(MODEL_NAME)
-
         self.cross_encoder = None
         try:
             self.cross_encoder = CrossEncoder('cross-encoder/ms-marco-MiniLM-L6-v2')
@@ -104,12 +103,9 @@ class NasaRetriever:
     def search(self, query: str, top_k: int = 5):
         dense = self.retrieve_dense(query, k=50)
         sparse = self.retrieve_bm25(query, k=50)
-
         fused = self.rrf_fuse(dense, sparse)
-
         top_candidates = fused[:20]
         reranked = self.rerank(query, top_candidates)
-
         return reranked[:top_k]
 
 

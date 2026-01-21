@@ -4,13 +4,25 @@ from typing import Optional, Literal
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 import os
+import logging
 
-from app.router import NasaAgent
+from app.router import NasaAgent, METRICS
 from app.llm_engine import chat_once
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    handlers=[
+        logging.FileHandler("app.log", mode='a', encoding='utf-8'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger("app.main")
 
 app = FastAPI(title="NASA AI Agent", description="An AI agent built as part of an LLM project, designed to answer questions and perform reasoning tasks using NASA-related data.")
 
-print("Server Start: Loading Agent...")
+logger.info("Server Start: Loading Agent...")
 agent = NasaAgent()
 
 class AskRequest(BaseModel):
@@ -56,12 +68,15 @@ def ask_endpoint(req: AskRequest):
                 "status": "ok_chat_only"
             }
         except Exception as e:
+            logger.error(f"Chat Error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
     try:
         result = agent.run(req.query, model_mode=req.model_mode, mode=req.mode, top_k=req.k)
         status = result.get("status", "ok")
         answer_txt = (result.get("answer") or "")
+        if "blocked" in status:
+            logger.warning(f"Request blocked: {status}")
         if "blocked" in status or answer_txt.startswith("security_blocked:"):
             raise HTTPException(
                 status_code=403,
@@ -102,8 +117,21 @@ def ask_endpoint(req: AskRequest):
     except HTTPException as he:
         raise he
     except Exception as e:
+        logger.error(f"Critical Endpoint Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/stats")
+def get_stats():
+    total = METRICS["total_requests"]
+    success = METRICS["successful_requests"]
+    rate = (success / total * 100) if total > 0 else 0.0
+    return {
+        "metrics": METRICS,
+        "derived": {
+            "success_rate_percent": round(rate, 2)
+        },
+        "status": "online"
+    }
 
 # to check if works
 @app.get("/health")

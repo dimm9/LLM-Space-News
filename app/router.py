@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from typing import Dict, Any, Optional
 
@@ -10,8 +11,19 @@ from app.guardrails import (
     scrub_user_input,
     contains_pii,
     contains_profanity,
-    links_not_allowed, contains_path_traversal
+    links_not_allowed,
+    contains_path_traversal,
+    ALLOWED_DOMAINS
 )
+logger = logging.getLogger(__name__)
+
+METRICS = {
+    "total_requests": 0,
+    "successful_requests": 0,
+    "failed_requests": 0,
+    "tool_calls": 0,
+    "security_blocks": 0
+}
 
 SYSTEM_ROUTER = """
 You are the NASA Knowledge Assistant.
@@ -39,7 +51,7 @@ INSTRUCTIONS:
 - STRICT JSON FORMAT for tools (no markdown, no comments):
   {"tool": "kb.lookup", "args": {"query": "...", "top_k": 3}}
 - If the answer is not explicitly stated in the context, say: "I did not find this in the database."
-- Always include at least one 'Source:' line.
+- Always include at least one 'Source:' line. It should be from provided context.
 """
 
 _JSON_BLOCK_RE = re.compile(r"\{.*\}", re.DOTALL)
@@ -98,7 +110,8 @@ class NasaAgent:
         pass
 
     def run(self, user_query: str, model_mode=None, mode: str = "standard", top_k: int = 3) -> Dict[str, Any]:
-        # Guardrails
+        METRICS["total_requests"] += 1
+
         if detect_injection(user_query):
             return {"answer": "I cannot process this request (Injection Detected).", "status": "blocked_injection",
                     "tool_used": None}
@@ -108,11 +121,24 @@ class NasaAgent:
             clean_query = user_query.strip()
 
         if contains_path_traversal(clean_query):
+            METRICS["security_blocks"] += 1
+            METRICS["failed_requests"] += 1
             return {"answer": "Blocked: path traversal attempt.", "status": "blocked_path_traversal", "tool_used": None}
         if contains_profanity(clean_query):
+            METRICS["security_blocks"] += 1
+            METRICS["failed_requests"] += 1
             return {"answer": "Blocked: inappropriate language.", "status": "blocked_profanity", "tool_used": None}
-
-        print(f"Processing Query: {clean_query}", flush=True)  # FLUSH=TRUE WAŻNE
+        pii_detected = contains_pii(clean_query)
+        if any(pii_detected.values()):
+            METRICS["security_blocks"] += 1
+            METRICS["failed_requests"] += 1
+            return {"answer": "Blocked: PII detected in query.", "status": "blocked_pii", "tool_used": None}
+        if links_not_allowed(clean_query):
+            METRICS["security_blocks"] += 1
+            METRICS["failed_requests"] += 1
+            return {"answer": "Blocked: Query contains unauthorized links.", "status": "blocked_links",
+                    "tool_used": None}
+        logger.info(f"Processing Query: {clean_query}")
 
         router_resp = chat_once(
             prompt=f"User input: {clean_query}\n\nDecide: Return Tool JSON or Text Answer.",
@@ -122,15 +148,14 @@ class NasaAgent:
             model_mode=model_mode
         )
         text_out = router_resp.get("text", "")
-
         tool_call_obj = None
         try:
             tool_call_obj = self._extract_json_tool(text_out)
         except Exception:
-            # Fallback repair logic
+            # fallback
             looks_like_tool = ("\"tool\"" in text_out) or ("{tool" in text_out.lower()) or ("kb.lookup" in text_out)
             if looks_like_tool:
-                print("Invalid JSON received, attempting repair...", flush=True)
+                logger.info("Invalid JSON received, attempting repair...")
                 router_resp2 = chat_once(prompt=_make_repair_prompt(text_out), system=SYSTEM_ROUTER, temperature=0.0,
                                          model_mode=model_mode)
                 try:
@@ -138,26 +163,28 @@ class NasaAgent:
                 except Exception:
                     pass
 
-        # Default to KB if unknown
         if tool_call_obj is None:
-            print("No tool selected by LLM, defaulting to kb.lookup", flush=True)
+            logger.warning("No tool selected by LLM, defaulting to kb.lookup")
             tool_call_obj = ToolCall(tool="kb.lookup", args={"query": clean_query, "top_k": top_k})
-
-        print(f"Tool Selected: {tool_call_obj.tool} | Args: {tool_call_obj.args}", flush=True)
-
+        METRICS["tool_calls"] += 1
+        logger.info(f"Tool Selected: {tool_call_obj.tool} | Args: {tool_call_obj.args}")
         ok, result, err = run_tool_safe(tool_call_obj)
         if not ok:
-            return {"answer": f"Error executing tool: {err}", "status": "error", "tool_used": tool_call_obj.tool}
+            logger.error(f"Tool execution error: {err}")
+            return {"answer": f"Error executing tool: {err}", "status": "ok", "tool_used": tool_call_obj.tool}
 
         if tool_call_obj.tool == "kb.lookup":
             verr = _validate_kb_result(result)
-            if verr: return {"answer": verr, "status": "error", "tool_used": "kb.lookup"}
-
+            if verr:
+                logger.warning(f"KB Validation warning: {verr}. Treating as empty result.")
+                result = {"found": False, "hits": []}
         final_answer = self._synthesize_answer(clean_query, tool_call_obj.tool, result, model_mode=model_mode,
                                                mode=mode)
-
         if _looks_like_system_prompt_leak(final_answer):
+            METRICS["security_blocks"] += 1
+            METRICS["failed_requests"] += 1
             return {"answer": "Blocked: System prompt leak.", "status": "blocked", "tool_used": tool_call_obj.tool}
+        METRICS["successful_requests"] += 1
 
         return {"answer": final_answer, "status": "ok", "tool_used": tool_call_obj.tool, "tool_result": result}
 
@@ -181,7 +208,17 @@ class NasaAgent:
                 context_txt += f"- [{doc.get('title', '')}] {doc.get('chunk', '')} (Source: {doc.get('source', '')})\n"
 
             style_hint = "Be concise." if mode == "concise" else "Be detailed."
-            sys_prompt = f"You are a NASA expert. Answer based ONLY on context. {style_hint}"
+            allowed_domains_str = ", ".join(ALLOWED_DOMAINS)
+            sys_prompt = (
+                f"You are a NASA expert. {style_hint}\n"
+                f"Allowed/Trusted domains: {allowed_domains_str}\n"
+                "Answer the user's question based ONLY on the provided Context below if question about topics in provided context or use information from allowed links but still list the source.\n"
+                "If the answer is not about topics in the context, say 'I do not have enough information'.\n"
+                "If this is a casual greeting tell that you can do (say that you are helpful space astronomy assistant).\n"
+                "Do NOT use your own knowledge. Do NOT make up facts.\n"
+                "Help and correct user based on provided context and topics.\n"
+                "ALWAYS cite the source provided in the context or from allowed links (e.g., [Source: link from context])."
+            )
             user_prompt = f"Question: {query}\n\nContext:\n{context_txt}\n\nAnswer and cite sources:"
 
             resp = chat_once(user_prompt, system=sys_prompt, temperature=0.0, model_mode=model_mode)

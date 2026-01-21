@@ -1,6 +1,9 @@
 import glob, os
 from concurrent.futures import ThreadPoolExecutor, TimeoutError
 from typing import Dict, Any, Tuple, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 from app.tools.registry import ALLOWED_TOOLS, ToolCall, RagArgs, CalcArgs, SearchArgs, ConvertArgs
 
@@ -10,13 +13,13 @@ DATA_DIR = os.path.abspath(os.getenv("DATA_DIR", "./data"))
 def get_retriever():
     global _RETRIEVER
     if _RETRIEVER is None:
-        print("⏳ Initializing RAG Retriever (Please wait, loading models)...", flush=True)
+        logger.info("Initializing RAG Retriever (Please wait, loading models)...")
         try:
             from app.rag.retriever import NasaRetriever
             _RETRIEVER = NasaRetriever()
-            print("✅ RAG Retriever loaded successfully.", flush=True)
+            logger.info("RAG Retriever loaded successfully.")
         except Exception as e:
-            print(f"❌ Failed to load RAG: {e}", flush=True)
+            logger.error(f"failed to load RAG: {e}")
             return None
     return _RETRIEVER
 
@@ -73,7 +76,7 @@ def _run_tool_sync(tc: ToolCall) -> Dict[str, Any]:
         if retriever is None:
             return {"error": "RAG system not initialized (check logs)"}
 
-        print(f"🔍 RAG Search: {args.query}", flush=True)
+        logger.info(f"RAG Search: {args.query}")
         hits = retriever.search(args.query, top_k=args.top_k)
         if not hits:
             return {"found": False, "hits": []}
@@ -82,18 +85,18 @@ def _run_tool_sync(tc: ToolCall) -> Dict[str, Any]:
     raise ValueError(f"Unhandled tool implementation: {tc.tool}")
 
 
-def run_tool_safe(tc: ToolCall, timeout_s: float = 60.0) -> Tuple[bool, Dict[str, Any], Optional[str]]:
-    print(f"🛠️ Executing Tool: {tc.tool}...", flush=True)
+def run_tool_safe(tc: ToolCall, timeout_s: float = 10.0) -> Tuple[bool, Dict[str, Any], Optional[str]]:
     try:
         with ThreadPoolExecutor(max_workers=1) as ex:
             fut = ex.submit(_run_tool_sync, tc)
             result = fut.result(timeout=timeout_s)
-            print(f"✅ Tool Finished: {tc.tool}", flush=True)
+            logger.info(f"Tool Finished: {tc.tool}")
             return True, result, None
 
+
     except TimeoutError:
-        print(f"❌ Tool Timeout: {tc.tool}", flush=True)
+        logger.warning(f"Tool Timeout: {tc.tool}")
         return False, {}, "Tool execution timed out (security limit)"
     except Exception as e:
-        print(f"❌ Tool Error: {str(e)}", flush=True)
+        logger.error(f"Tool Error: {str(e)}")
         return False, {}, str(e)

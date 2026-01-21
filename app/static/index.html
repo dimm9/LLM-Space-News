@@ -254,11 +254,6 @@
 
       <div class="row">
         <label class="field">
-          <strong>k</strong>
-          <input id="k" type="number" min="1" max="10" value="3" />
-        </label>
-
-        <label class="field">
           <strong>mode</strong>
           <select id="mode">
             <option value="standard" selected>standard</option>
@@ -319,8 +314,6 @@
 
       const payload = {
         query: q,
-        use_functions: $("use_functions").checked,
-        k: parseInt($("k").value || "3", 10),
         mode: $("mode").value,
         model_mode: $("model_mode").value
       };

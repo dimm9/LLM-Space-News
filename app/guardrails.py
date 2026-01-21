@@ -3,14 +3,16 @@ from typing import Optional
 
 INJECTION_PATTERNS = [
     r"ignore (all|previous|above) instructions",
-    r"reveal (system|developer) prompt",
+    r"(reveal|show|display|print|give me) (the )?(system|developer|hidden) prompt",
+    r"act as (system|developer|unrestricted)",
     r"override .* rules",
-    r"act as (system|developer)",
     r"you are now",
     r"jailbreak",
     r"follow the (next|below) instructions",
-    r"api",
-    r"env"
+    r"api key",
+    r"environment variable",
+    r"env",
+    "(system|developer) prompt",
 ]
 
 DEFAULT_SYSTEM = "You are a concise, literal assistant. Be safe and stick to instructions."
@@ -25,7 +27,7 @@ ALLOWED_DOMAINS = {"example.com", "spacenews.com", "www.nasa.gov", "science.nasa
 
 RE_PATH_TRAVERSAL = re.compile(r"(\.\./|\.\.\\)+")
 
-RE_BASE64 = re.compile(r"^[A-Za-z0-9+/=]{16,}$")  # min długość, żeby nie łapać byle czego
+RE_BASE64 = re.compile(r"^[A-Za-z0-9+/=]{16,}$")
 
 def _printable_ratio(s: str) -> float:
     if not s:
